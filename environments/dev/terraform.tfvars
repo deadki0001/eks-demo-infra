@@ -1,0 +1,5 @@
+aws_account_id  = "988176743547"
+aws_region      = "us-east-2"
+cluster_name    = "lsd-payments-dev"
+github_org      = "deadki0001"
+github_app_repo = "eks-demo-app"
