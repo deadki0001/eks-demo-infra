@@ -142,7 +142,6 @@ module "ecr" {
 module "eks" {
   source             = "../../modules/eks"
   private_subnet_ids = module.vpc.private_subnet_ids
-  sso_admin_role_arn = "arn:aws:iam::988176743547:role/aws-reserved/sso.amazonaws.com/us-east-2/AWSReservedSSO_AdministratorAccess_d45f6785e0e6d083"
 }
 
 
