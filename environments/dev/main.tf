@@ -104,9 +104,6 @@ resource "random_password" "db" {
 # No inputs needed - GitHub's endpoint is a known public URL.
 # Output: arn - passed to iam-roles module
 # ##############################################################################
-
-# module "oidc_github" {
-  source = "../../modules/oidc-github"
 }
 
 
@@ -163,7 +160,7 @@ module "iam_roles" {
 
   oidc_provider_arn        = module.eks.oidc_provider_arn
   oidc_provider_url        = module.eks.oidc_provider_url
-  github_oidc_provider_arn = module.oidc_github.arn
+  github_oidc_provider_arn = "arn:aws:iam::988176743547:oidc-provider/token.actions.githubusercontent.com"
   github_org               = var.github_org
   github_app_repo          = var.github_app_repo
   region                   = var.aws_region
