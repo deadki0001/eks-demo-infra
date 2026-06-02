@@ -1,0 +1,62 @@
+# ##############################################################################
+# DESTROY PIPELINE - lsd-payments
+#
+# Run this manually at the end of the day to avoid costs.
+# Tears down all infrastructure created by the main pipeline.
+#
+# How to run:
+#   GitHub repo -> Actions -> Destroy Infrastructure -> Run workflow
+#
+# WARNING: This deletes everything. Only run when you are done for the day.
+# ##############################################################################
+
+name: Destroy Infrastructure
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type DESTROY to confirm you want to delete all infrastructure"
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  TF_VERSION: "1.7.5"
+  WORKING_DIR: environments/dev
+
+jobs:
+  destroy:
+    name: Terraform Destroy
+    runs-on: ubuntu-latest
+    environment: production-infra
+    if: github.event.inputs.confirm == 'DESTROY'
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=eks-demo-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}"
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve
