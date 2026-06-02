@@ -7,7 +7,3 @@ variable "private_subnet_ids" {
   type        = list(string)
 }
 
-variable "sso_admin_role_arn" {
-  description = "ARN of the SSO admin role - granted cluster admin access automatically"
-  type        = string
-}
