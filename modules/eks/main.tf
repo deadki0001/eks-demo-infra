@@ -359,3 +359,42 @@ resource "aws_eks_addon" "kube_proxy" {
   }
 }
 
+
+# ##############################################################################
+# CLUSTER ACCESS ENTRIES
+#
+# Sets authentication mode to API_AND_CONFIG_MAP so we can use both
+# the modern access entries API and the legacy aws-auth ConfigMap.
+#
+# Then creates an access entry for the SSO admin role so the person
+# who deployed this can always access the cluster with kubectl.
+# Without this, only the IAM identity that created the cluster has access
+# and you get locked out if that identity changes.
+#
+# This solves the problem we hit manually - never again.
+# ##############################################################################
+
+resource "aws_eks_access_entry" "sso_admin" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.sso_admin_role_arn
+  type          = "STANDARD"
+
+  tags = {
+    Name        = "lsd-payments-dev-sso-admin"
+    Project     = "lsd-payments"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+  }
+}
+
+resource "aws_eks_access_policy_association" "sso_admin" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.sso_admin_role_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.sso_admin]
+}
