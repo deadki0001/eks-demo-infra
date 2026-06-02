@@ -1,0 +1,292 @@
+# ##############################################################################
+# INFRASTRUCTURE PIPELINE - lsd-payments
+#
+# This pipeline runs Terraform to create and manage all infrastructure.
+#
+# Triggers:
+#   - Pull request to main: runs plan only, posts result as PR comment
+#   - Push to main: runs plan then waits for manual approval then applies
+#
+# Stages:
+#   1. Validate    - check formatting and syntax
+#   2. IaC Scan    - tfsec and Checkov security scanning
+#   3. OPA Check   - policy validation via Conftest
+#   4. Plan        - terraform plan, post to PR as comment
+#   5. Approval    - manual gate before apply (main branch only)
+#   6. Apply       - terraform apply (main branch only)
+# ##############################################################################
+
+name: Infrastructure Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'environments/**'
+      - 'modules/**'
+      - 'policies/**'
+  push:
+    branches: [main]
+    paths:
+      - 'environments/**'
+      - 'modules/**'
+      - 'policies/**'
+  workflow_dispatch:
+
+permissions:
+  id-token: write    # Required for OIDC role assumption
+  contents: read
+  pull-requests: write  # Required to post plan as PR comment
+
+env:
+  TF_VERSION: "1.7.5"
+  WORKING_DIR: environments/dev
+
+jobs:
+
+  # ##############################################################################
+  # STAGE 1: VALIDATE
+  # Checks Terraform formatting and syntax before doing anything else.
+  # Fast and cheap - catches typos and formatting issues immediately.
+  # ##############################################################################
+
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=eks-demo-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}"
+
+      - name: Terraform Validate
+        run: terraform validate
+
+
+  # ##############################################################################
+  # STAGE 2: IAC SECURITY SCAN
+  # Scans Terraform files for security misconfigurations.
+  #
+  # tfsec  - fast AWS-specific security rules
+  # Checkov - broader scan mapped to CIS benchmarks and compliance frameworks
+  #           This is what impresses Technical Managers - findings are mapped
+  #           to named compliance controls like CIS 1.2, SOC2, PCI-DSS
+  # ##############################################################################
+
+  iac-scan:
+    name: IaC Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.0
+        with:
+          working_directory: .
+          soft_fail: true   # Warn but do not block - review findings manually
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          soft_fail: true   # Warn but do not block for demo purposes
+
+
+  # ##############################################################################
+  # STAGE 3: OPA POLICY CHECK
+  # Runs your Rego policies against the Terraform plan JSON.
+  # This enforces your organisational policies - things Checkov does not cover.
+  #
+  # Example policies checked:
+  #   - RDS must not be publicly accessible
+  #   - Required tags must be present
+  #   - No open security groups
+  # ##############################################################################
+
+  opa-check:
+    name: OPA Policy Check
+    runs-on: ubuntu-latest
+    needs: validate
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=eks-demo-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}"
+
+      - name: Generate Terraform Plan JSON for OPA
+        run: |
+          terraform plan -out=tfplan.binary
+          terraform show -json tfplan.binary > tfplan.json
+
+      - name: Install Conftest
+        run: |
+          curl -sSL "https://github.com/open-policy-agent/conftest/releases/download/v0.50.0/conftest_0.50.0_Linux_x86_64.tar.gz" \
+            -o /tmp/conftest.tar.gz
+          tar xzf /tmp/conftest.tar.gz -C /tmp/
+          sudo install -m 555 /tmp/conftest /usr/local/bin/conftest
+
+      - name: Run OPA Policies
+        run: |
+          if [ -d "../../policies/rego" ] && [ "$(ls -A ../../policies/rego)" ]; then
+            conftest test tfplan.json \
+              --policy ../../policies/rego/ \
+              --output table
+          else
+            echo "No OPA policies found yet - skipping"
+          fi
+
+
+  # ##############################################################################
+  # STAGE 4: PLAN
+  # Generates the Terraform plan and posts it as a comment on the PR.
+  # This is the review step - engineers see exactly what will change
+  # before anyone approves the deployment.
+  # ##############################################################################
+
+  plan:
+    name: Terraform Plan
+    runs-on: ubuntu-latest
+    needs: [iac-scan, opa-check]
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=eks-demo-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}"
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color 2>&1 | tee plan_output.txt
+        continue-on-error: true
+
+      - name: Post Plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync('${{ env.WORKING_DIR }}/plan_output.txt', 'utf8');
+            const truncated = plan.length > 60000
+              ? plan.substring(0, 60000) + '\n\n... [truncated - see full output in Actions]'
+              : plan;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Terraform Plan\n\`\`\`\n${truncated}\n\`\`\``
+            });
+
+      - name: Save plan artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: ${{ env.WORKING_DIR }}/plan_output.txt
+
+
+  # ##############################################################################
+  # STAGE 5 + 6: MANUAL APPROVAL + APPLY
+  #
+  # This job only runs on pushes to main (not PRs).
+  # The "environment: production-infra" line is the approval gate.
+  #
+  # To configure the gate:
+  #   GitHub repo → Settings → Environments → New environment
+  #   Name: production-infra
+  #   Add yourself as a required reviewer
+  #
+  # The pipeline will pause here and send you an email.
+  # You review the plan from Stage 4 then click Approve.
+  # Only then does terraform apply run.
+  # ##############################################################################
+
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: [iac-scan, opa-check]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    environment: production-infra
+    defaults:
+      run:
+        working-directory: ${{ env.WORKING_DIR }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=eks-demo-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=${{ secrets.AWS_REGION }}"
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
