@@ -105,7 +105,7 @@ resource "random_password" "db" {
 # Output: arn - passed to iam-roles module
 # ##############################################################################
 
-module "oidc_github" {
+# module "oidc_github" {
   source = "../../modules/oidc-github"
 }
 
@@ -202,7 +202,7 @@ module "rds" {
 # ##############################################################################
 
 resource "aws_secretsmanager_secret" "rds" {
-  name        = "lsd-payments/rds"
+  name        = "lsd-payments/rds-v2"
   description = "RDS connection details for lsd-payments backend"
 
   tags = {
