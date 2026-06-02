@@ -56,3 +56,65 @@ output "github_oidc_provider_arn" {
   description = "Add this to your GitHub Actions secrets as GITHUB_OIDC_PROVIDER_ARN"
   value       = aws_iam_openid_connect_provider.github.arn
 }
+
+# ##############################################################################
+# GITHUB ACTIONS IAM ROLE
+#
+# This role is assumed by the GitHub Actions pipeline to run Terraform.
+# It needs broad permissions to create VPC, EKS, RDS, IAM roles etc.
+# We create it manually once so the pipeline can use it immediately.
+#
+# The trust policy locks it to only your specific infra repo.
+# No other repo can assume this role.
+# ##############################################################################
+
+resource "aws_iam_role" "github_actions_infra" {
+  name        = "lsd-payments-github-actions-infra"
+  description = "Assumed by GitHub Actions to run Terraform for infrastructure"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Federated = aws_iam_openid_connect_provider.github.arn
+        }
+        Action = "sts:AssumeRoleWithWebIdentity"
+        Condition = {
+          StringLike = {
+            "token.actions.githubusercontent.com:sub" = "repo:deadki0001/eks-demo-infra:*"
+          }
+          StringEquals = {
+            "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
+          }
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "lsd-payments-github-actions-infra"
+    Project     = "lsd-payments"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+  }
+}
+
+# ##############################################################################
+# PERMISSIONS FOR THE INFRA ROLE
+#
+# This role needs to create and manage all infrastructure resources.
+# We attach AdministratorAccess for the demo - in production you would
+# scope this down to only the services Terraform needs.
+# ##############################################################################
+
+resource "aws_iam_role_policy_attachment" "github_actions_infra" {
+  role       = aws_iam_role.github_actions_infra.name
+  policy_arn = "arn:aws:iam::aws:policy/AdministratorAccess"
+}
+
+output "github_actions_infra_role_arn" {
+  description = "Add this to GitHub secrets as AWS_ROLE_ARN"
+  value       = aws_iam_role.github_actions_infra.arn
+}

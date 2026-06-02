@@ -62,7 +62,7 @@ resource "aws_iam_role" "alb_controller" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect    = "Allow"
+        Effect = "Allow"
         Principal = {
           Federated = var.oidc_provider_arn
         }
@@ -124,7 +124,7 @@ resource "aws_iam_role" "external_secrets" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect    = "Allow"
+        Effect = "Allow"
         Principal = {
           Federated = var.oidc_provider_arn
         }
@@ -209,7 +209,7 @@ resource "aws_iam_role" "github_actions" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect    = "Allow"
+        Effect = "Allow"
         Principal = {
           Federated = var.github_oidc_provider_arn
         }

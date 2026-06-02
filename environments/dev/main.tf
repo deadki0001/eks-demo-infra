@@ -75,7 +75,7 @@ provider "kubernetes" {
       "eks",
       "get-token",
       "--cluster-name", var.cluster_name,
-      "--region",       var.aws_region
+      "--region", var.aws_region
     ]
   }
 }
