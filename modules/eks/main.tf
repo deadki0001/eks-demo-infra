@@ -82,6 +82,10 @@ resource "aws_eks_cluster" "main" {
   role_arn = aws_iam_role.cluster.arn
   version  = "1.30"
 
+  access_config {
+    authentication_mode = "API_AND_CONFIG_MAP"
+  }
+
   vpc_config {
     subnet_ids              = var.private_subnet_ids
     endpoint_private_access = true
@@ -371,3 +375,30 @@ resource "aws_eks_addon" "kube_proxy" {
 # Without this, only the IAM identity that created the cluster has access
 # and you get locked out if that identity changes.
 #
+
+resource "aws_eks_access_entry" "sso_admin" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.sso_admin_role_arn
+  type          = "STANDARD"
+
+  tags = {
+    Name        = "lsd-payments-dev-sso-admin"
+    Project     = "lsd-payments"
+    Environment = "dev"
+    ManagedBy   = "terraform"
+  }
+
+  depends_on = [aws_eks_cluster.main]
+}
+
+resource "aws_eks_access_policy_association" "sso_admin" {
+  cluster_name  = aws_eks_cluster.main.name
+  principal_arn = var.sso_admin_role_arn
+  policy_arn    = "arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy"
+
+  access_scope {
+    type = "cluster"
+  }
+
+  depends_on = [aws_eks_access_entry.sso_admin]
+}
