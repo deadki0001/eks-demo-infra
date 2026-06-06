@@ -224,7 +224,7 @@ resource "aws_iam_role_policy_attachment" "node_cni" {
 # With IMDSv2 that attack does not work because the pod cannot get
 # the session token needed to query the metadata service.
 #
-# http_put_response_hop_limit = 1 means the metadata response
+# http_put_response_hop_limit = 2 means the metadata response
 # cannot travel more than one network hop. A pod is two hops
 # away from the metadata service so even if it tries it cannot
 # reach it. Extra defence on top of IMDSv2.
@@ -236,7 +236,7 @@ resource "aws_launch_template" "node" {
   metadata_options {
     http_endpoint               = "enabled"
     http_tokens                 = "required"
-    http_put_response_hop_limit = 1
+    http_put_response_hop_limit = 2
   }
 
   tag_specifications {
@@ -261,7 +261,7 @@ resource "aws_launch_template" "node" {
 # scaling_config defines how many nodes you want.
 # desired = 2 means start with 2 nodes.
 # min = 1 means never go below 1 (cost saving).
-# max = 4 means never go above 4 (cost protection).
+# max = 3 means never go above 3 for this demo.
 #
 # The nodes go in private subnets - they have no public IP
 # and are not directly reachable from the internet.
@@ -274,13 +274,13 @@ resource "aws_eks_node_group" "main" {
   node_group_name = "lsd-payments-dev-nodes"
   node_role_arn   = aws_iam_role.node.arn
   subnet_ids      = var.private_subnet_ids
-  ami_type        = "AL2_x86_64"
-  instance_types  = ["t3.small"]
+  ami_type        = "AL2023_x86_64_STANDARD"
+  instance_types  = ["t3.medium"]
 
   scaling_config {
-    desired_size = 1
+    desired_size = 2
     min_size     = 1
-    max_size     = 2
+    max_size     = 3
   }
 
   update_config {
