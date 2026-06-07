@@ -21,6 +21,7 @@
 # Stores the React frontend Docker images.
 #
 # image_tag_mutability = "IMMUTABLE" means once you push an image
+  force_delete         = true
 # with a tag like "abc1234" you cannot overwrite it.
 # This is a security and audit control - you can always trace
 # exactly which code is running in your cluster.
@@ -33,6 +34,7 @@
 resource "aws_ecr_repository" "frontend" {
   name                 = "lsd-frontend"
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
@@ -61,6 +63,7 @@ resource "aws_ecr_repository" "frontend" {
 resource "aws_ecr_repository" "backend" {
   name                 = "lsd-backend"
   image_tag_mutability = "IMMUTABLE"
+  force_delete         = true
 
   image_scanning_configuration {
     scan_on_push = true
