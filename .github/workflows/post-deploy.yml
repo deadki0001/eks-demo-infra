@@ -130,6 +130,8 @@ jobs:
             --create-namespace \
             --timeout 5m
           kubectl -n dynatrace rollout status deployment/dynatrace-operator --timeout=120s
+          kubectl -n dynatrace rollout status deployment/dynatrace-webhook --timeout=120s
+          sleep 15
 
       - name: Create Dynatrace tokens secret
         run: |
