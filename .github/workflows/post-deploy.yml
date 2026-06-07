@@ -1,0 +1,163 @@
+# ##############################################################################
+# POST-DEPLOY PIPELINE - lsd-payments
+#
+# Runs automatically after the infrastructure pipeline completes.
+# Installs all cluster components in the correct order.
+#
+# Order matters:
+#   1. ALB Controller    - must be first, other ingresses depend on it
+#   2. Gatekeeper        - policy enforcement before any app deploys
+#   3. External Secrets  - needed by app to pull DB credentials
+#   4. ArgoCD            - GitOps controller for app deployment
+#   5. Dynatrace         - monitoring, last so it instruments everything
+#   6. OPA Policies      - applied after Gatekeeper is ready
+#   7. ArgoCD App        - registers the app with ArgoCD
+# ##############################################################################
+
+name: Post-Deploy - Install Cluster Components
+
+on:
+  workflow_run:
+    workflows: ["Infrastructure Pipeline"]
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CLUSTER_NAME: lsd-payments-dev
+  AWS_REGION: us-east-2
+
+jobs:
+  install-components:
+    name: Install Cluster Components
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4.1.0
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install kubectl
+        run: |
+          curl -sSL "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl" -o /tmp/kubectl
+          chmod +x /tmp/kubectl
+          sudo mv /tmp/kubectl /usr/local/bin/kubectl
+
+      - name: Install Helm
+        run: |
+          curl -sSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+      - name: Configure kubectl
+        run: |
+          aws eks update-kubeconfig \
+            --name ${{ env.CLUSTER_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Get Terraform outputs
+        id: tf-outputs
+        working-directory: environments/dev
+        run: |
+          terraform init \
+            -backend-config="bucket=eks-demo-tfstate-${{ secrets.AWS_ACCOUNT_ID }}" \
+            -backend-config="key=dev/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}"
+
+          echo "alb_role_arn=$(terraform output -raw alb_controller_role_arn)" >> $GITHUB_OUTPUT
+          echo "eso_role_arn=$(terraform output -raw external_secrets_role_arn)" >> $GITHUB_OUTPUT
+          echo "vpc_id=$(aws eks describe-cluster --name ${{ env.CLUSTER_NAME }} --region ${{ env.AWS_REGION }} --query 'cluster.resourcesVpcConfig.vpcId' --output text)" >> $GITHUB_OUTPUT
+
+      - name: Add Helm repos
+        run: |
+          helm repo add eks https://aws.github.io/eks-charts
+          helm repo add gatekeeper https://open-policy-agent.github.io/gatekeeper/charts
+          helm repo add external-secrets https://charts.external-secrets.io
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo add dynatrace https://raw.githubusercontent.com/Dynatrace/dynatrace-operator/main/config/helm/repos/stable
+          helm repo update
+
+      - name: Install ALB Controller
+        run: |
+          helm upgrade --install aws-load-balancer-controller eks/aws-load-balancer-controller \
+            --namespace kube-system \
+            --set clusterName=${{ env.CLUSTER_NAME }} \
+            --set region=${{ env.AWS_REGION }} \
+            --set vpcId=${{ steps.tf-outputs.outputs.vpc_id }} \
+            --set serviceAccount.create=true \
+            --set serviceAccount.name=aws-load-balancer-controller \
+            --set "serviceAccount.annotations.eks\.amazonaws\.com/role-arn=${{ steps.tf-outputs.outputs.alb_role_arn }}"
+          kubectl -n kube-system rollout status deployment/aws-load-balancer-controller --timeout=120s
+
+      - name: Install Gatekeeper
+        run: |
+          helm upgrade --install gatekeeper gatekeeper/gatekeeper \
+            --namespace gatekeeper-system \
+            --create-namespace \
+            --set replicas=1
+          kubectl -n gatekeeper-system rollout status deployment/gatekeeper-controller-manager --timeout=180s
+
+      - name: Install External Secrets
+        run: |
+          helm upgrade --install external-secrets external-secrets/external-secrets \
+            --namespace external-secrets \
+            --create-namespace \
+            --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=${{ steps.tf-outputs.outputs.eso_role_arn }}
+          kubectl -n external-secrets rollout status deployment/external-secrets --timeout=180s
+
+      - name: Install ArgoCD
+        run: |
+          helm upgrade --install argocd argo/argo-cd \
+            --namespace argocd \
+            --create-namespace
+          kubectl -n argocd rollout status deployment/argocd-server --timeout=300s
+
+      - name: Install Dynatrace Operator
+        run: |
+          helm upgrade --install dynatrace-operator dynatrace/dynatrace-operator \
+            --namespace dynatrace \
+            --create-namespace \
+            --timeout 5m
+          kubectl -n dynatrace rollout status deployment/dynatrace-operator --timeout=120s
+
+      - name: Create Dynatrace tokens secret
+        run: |
+          DT_SECRET=$(aws secretsmanager get-secret-value \
+            --secret-id lsd-payments/dynatrace \
+            --region ${{ env.AWS_REGION }} \
+            --query SecretString \
+            --output text)
+
+          DT_API_TOKEN=$(echo $DT_SECRET | jq -r .apiToken)
+          DT_INGEST_TOKEN=$(echo $DT_SECRET | jq -r .dataIngestToken)
+
+          kubectl create secret generic dynatrace-tokens \
+            --namespace dynatrace \
+            --from-literal=apiToken=${DT_API_TOKEN} \
+            --from-literal=dataIngestToken=${DT_INGEST_TOKEN} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply DynaKube
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/dynatrace/dynakube.yaml
+
+      - name: Apply OPA Policies
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/policies/gatekeeper/templates/
+          sleep 15
+          kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/policies/gatekeeper/constraints/
+
+      - name: Apply ArgoCD Application
+        run: |
+          kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/argocd/application.yaml
+
+      - name: Verify all pods running
+        run: |
+          echo "=== Final pod status ==="
+          kubectl get pods -A
