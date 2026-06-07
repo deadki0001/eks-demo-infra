@@ -156,9 +156,16 @@ jobs:
 
       - name: Apply OPA Policies
         run: |
-          kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/policies/gatekeeper/templates/
+          BASE=https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/policies/gatekeeper
+          kubectl apply -f ${BASE}/templates/block-latest-tag.yaml
+          kubectl apply -f ${BASE}/templates/block-privileged.yaml
+          kubectl apply -f ${BASE}/templates/require-labels.yaml
+          kubectl apply -f ${BASE}/templates/require-resource-limits.yaml
           sleep 15
-          kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/policies/gatekeeper/constraints/
+          kubectl apply -f ${BASE}/constraints/block-latest-tag.yaml
+          kubectl apply -f ${BASE}/constraints/block-privileged.yaml
+          kubectl apply -f ${BASE}/constraints/require-labels.yaml
+          kubectl apply -f ${BASE}/constraints/require-resource-limits.yaml
 
       - name: Apply ArgoCD Application
         run: |
