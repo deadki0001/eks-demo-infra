@@ -21,7 +21,6 @@
 # Stores the React frontend Docker images.
 #
 # image_tag_mutability = "IMMUTABLE" means once you push an image
-  force_delete         = true
 # with a tag like "abc1234" you cannot overwrite it.
 # This is a security and audit control - you can always trace
 # exactly which code is running in your cluster.
