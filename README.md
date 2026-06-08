@@ -47,6 +47,6 @@ Diagram source: [lsd-payments-architecture.drawio](lsd-payments-architecture.dra
 
 - **Single NAT Gateway** for the dev environment to reduce cost (vs. one per AZ in prod).
 - **IRSA** grants least-privilege AWS access to specific service accounts (ALB Controller, External Secrets) instead of node-wide IAM roles.
-- **Secrets never live in Git** — External Secrets Operator pulls from Secrets Manager at runtime.
-- **GitOps with ArgoCD** — the GitHub repo is the single source of truth; GitHub Actions only builds/pushes images and bumps the image tag.
-- **Private workloads** — all compute (EKS nodes, RDS) is in private subnets; only the ALB is internet-facing.
+- **Secrets never live in Git** - External Secrets Operator pulls from Secrets Manager at runtime.
+- **GitOps with ArgoCD** - the GitHub repo is the single source of truth; GitHub Actions only builds/pushes images and bumps the image tag.
+- **Private workloads** - all compute (EKS nodes, RDS) is in private subnets; only the ALB is internet-facing.
