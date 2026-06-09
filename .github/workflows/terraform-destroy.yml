@@ -58,5 +58,27 @@ jobs:
             -backend-config="key=dev/terraform.tfstate" \
             -backend-config="region=${{ secrets.AWS_REGION }}"
 
+      - name: Cleanup ALB and Target Groups
+        run: |
+          echo "Cleaning up ALBs created by ALB Controller..."
+          ALB_ARNS=$(aws elbv2 describe-load-balancers --region us-east-2 \
+            --query "LoadBalancers[?contains(LoadBalancerName, 'lsdpayme')].LoadBalancerArn" \
+            --output text)
+          for ARN in $ALB_ARNS; do
+            echo "Deleting ALB: $ARN"
+            aws elbv2 delete-load-balancer --load-balancer-arn $ARN --region us-east-2
+          done
+          [ -n "$ALB_ARNS" ] && sleep 30 || echo "No ALBs found"
+
+          echo "Cleaning up target groups..."
+          TG_ARNS=$(aws elbv2 describe-target-groups --region us-east-2 \
+            --query "TargetGroups[?contains(TargetGroupName, 'lsdpayme')].TargetGroupArn" \
+            --output text)
+          for ARN in $TG_ARNS; do
+            echo "Deleting target group: $ARN"
+            aws elbv2 delete-target-group --target-group-arn $ARN --region us-east-2
+          done
+          echo "Cleanup complete"
+
       - name: Terraform Destroy
         run: terraform destroy -auto-approve
