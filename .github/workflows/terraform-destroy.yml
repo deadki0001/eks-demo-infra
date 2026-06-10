@@ -78,6 +78,20 @@ jobs:
             echo "Deleting target group: $ARN"
             aws elbv2 delete-target-group --target-group-arn $ARN --region us-east-2
           done
+          echo "Cleaning up ALB security groups..."
+          VPC_ID=$(aws ec2 describe-vpcs --region us-east-2 \
+            --filters "Name=tag:Name,Values=lsd-payments-dev" \
+            --query "Vpcs[0].VpcId" --output text)
+          if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
+            SG_IDS=$(aws ec2 describe-security-groups --region us-east-2 \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query "SecurityGroups[?GroupName!='default'].GroupId" \
+              --output text)
+            for SG in $SG_IDS; do
+              echo "Deleting security group: $SG"
+              aws ec2 delete-security-group --group-id $SG --region us-east-2 || true
+            done
+          fi
           echo "Cleanup complete"
 
       - name: Terraform Destroy
