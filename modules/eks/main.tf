@@ -80,7 +80,7 @@ resource "aws_iam_role_policy_attachment" "cluster_policy" {
 resource "aws_eks_cluster" "main" {
   name     = "lsd-payments-dev"
   role_arn = aws_iam_role.cluster.arn
-  version  = "1.30"
+  version  = "1.34"
 
   access_config {
     authentication_mode                         = "API_AND_CONFIG_MAP"

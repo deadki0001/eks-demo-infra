@@ -47,7 +47,7 @@ jobs:
 
       - name: Install kubectl
         run: |
-          curl -sSL "https://dl.k8s.io/release/v1.30.0/bin/linux/amd64/kubectl" -o /tmp/kubectl
+          curl -sSL "https://dl.k8s.io/release/v1.34.0/bin/linux/amd64/kubectl" -o /tmp/kubectl
           chmod +x /tmp/kubectl
           sudo mv /tmp/kubectl /usr/local/bin/kubectl
 
@@ -122,6 +122,71 @@ jobs:
             --namespace argocd \
             --create-namespace
           kubectl -n argocd rollout status deployment/argocd-server --timeout=300s
+
+      - name: Install Istio
+        run: |
+          # Download istioctl
+          curl -sSL https://istio.io/downloadIstio | ISTIO_VERSION=1.23.2 sh -
+          sudo mv istio-1.23.2/bin/istioctl /usr/local/bin/istioctl
+
+          # Install Istio with minimal profile - excludes ingress gateway
+          # (we use ALB not Istio gateway)
+          istioctl install --set profile=minimal -y
+
+          # Wait for control plane
+          kubectl -n istio-system rollout status deployment/istiod --timeout=180s
+
+          # Add Istio observability addons (Kiali, Jaeger, Prometheus)
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.23/samples/addons/prometheus.yaml
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.23/samples/addons/jaeger.yaml
+          kubectl apply -f https://raw.githubusercontent.com/istio/istio/release-1.23/samples/addons/kiali.yaml
+          sleep 30
+
+          # Enable sidecar injection on lsd-payments namespace
+          # (namespace created by ArgoCD so we patch it after ArgoCD runs)
+          kubectl label namespace lsd-payments istio-injection=enabled --overwrite || true
+
+          # Exclude kube-system and other system namespaces from injection
+          for ns in kube-system external-secrets argocd gatekeeper-system dynatrace; do
+            kubectl label namespace $ns istio-injection=disabled --overwrite || true
+          done
+
+          echo "Istio installed successfully"
+          istioctl version
+
+      - name: Apply Istio mTLS Policy
+        run: |
+          # Enforce STRICT mTLS for all services in lsd-payments namespace
+          cat <<EOF | kubectl apply -f -
+          apiVersion: security.istio.io/v1beta1
+          kind: PeerAuthentication
+          metadata:
+            name: default
+            namespace: lsd-payments
+          spec:
+            mtls:
+              mode: STRICT
+          EOF
+
+          # AuthorizationPolicy - only allow frontend to call backend
+          cat <<EOF | kubectl apply -f -
+          apiVersion: security.istio.io/v1beta1
+          kind: AuthorizationPolicy
+          metadata:
+            name: lsd-backend-policy
+            namespace: lsd-payments
+          spec:
+            selector:
+              matchLabels:
+                app: lsd-backend
+            rules:
+            - from:
+              - source:
+                  principals:
+                  - cluster.local/ns/lsd-payments/sa/default
+          EOF
+
+          echo "Istio security policies applied"
 
       - name: Install Dynatrace Operator
         run: |
