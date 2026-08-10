@@ -154,40 +154,6 @@ jobs:
           echo "Istio installed successfully"
           istioctl version
 
-      - name: Apply Istio mTLS Policy
-        run: |
-          # Enforce STRICT mTLS for all services in lsd-payments namespace
-          cat <<EOF | kubectl apply -f -
-          apiVersion: security.istio.io/v1beta1
-          kind: PeerAuthentication
-          metadata:
-            name: default
-            namespace: lsd-payments
-          spec:
-            mtls:
-              mode: STRICT
-          EOF
-
-          # AuthorizationPolicy - only allow frontend to call backend
-          cat <<EOF | kubectl apply -f -
-          apiVersion: security.istio.io/v1beta1
-          kind: AuthorizationPolicy
-          metadata:
-            name: lsd-backend-policy
-            namespace: lsd-payments
-          spec:
-            selector:
-              matchLabels:
-                app: lsd-backend
-            rules:
-            - from:
-              - source:
-                  principals:
-                  - cluster.local/ns/lsd-payments/sa/default
-          EOF
-
-          echo "Istio security policies applied"
-
       - name: Install Dynatrace Operator
         run: |
           helm upgrade --install dynatrace-operator dynatrace/dynatrace-operator \
@@ -235,6 +201,47 @@ jobs:
       - name: Apply ArgoCD Application
         run: |
           kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/argocd/application.yaml
+
+      - name: Apply Istio Security Policies
+        run: |
+          echo "Waiting for lsd-payments namespace to be created by ArgoCD..."
+          for i in $(seq 1 30); do
+            kubectl get namespace lsd-payments 2>/dev/null && break
+            echo "Attempt $i - namespace not ready yet, waiting 10s..."
+            sleep 10
+          done
+
+          kubectl label namespace lsd-payments istio-injection=enabled --overwrite
+
+          kubectl apply -f - <<EOF
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: default
+  namespace: lsd-payments
+spec:
+  mtls:
+    mode: STRICT
+EOF
+
+          kubectl apply -f - <<EOF
+apiVersion: security.istio.io/v1beta1
+kind: AuthorizationPolicy
+metadata:
+  name: lsd-backend-policy
+  namespace: lsd-payments
+spec:
+  selector:
+    matchLabels:
+      app: lsd-backend
+  rules:
+  - from:
+    - source:
+        principals:
+        - cluster.local/ns/lsd-payments/sa/default
+EOF
+
+          echo "Istio security policies applied"
 
       - name: Verify all pods running
         run: |
