@@ -162,7 +162,7 @@ jobs:
             --timeout 5m
           kubectl -n dynatrace rollout status deployment/dynatrace-operator --timeout=120s
           kubectl -n dynatrace rollout status deployment/dynatrace-webhook --timeout=120s
-          sleep 15
+          sleep 45
 
       - name: Create Dynatrace tokens secret
         run: |
@@ -183,6 +183,12 @@ jobs:
 
       - name: Apply DynaKube
         run: |
+          echo "Waiting for DynaKube CRD to be registered..."
+          for i in $(seq 1 20); do
+            kubectl get crd dynakubes.dynatrace.com 2>/dev/null && break
+            echo "Attempt $i - CRD not ready, waiting 10s..."
+            sleep 10
+          done
           kubectl apply -f https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/dynatrace/dynakube.yaml
 
       - name: Apply OPA Policies
