@@ -204,45 +204,17 @@ jobs:
 
       - name: Apply Istio Security Policies
         run: |
-          echo "Waiting for lsd-payments namespace to be created by ArgoCD..."
+          BASE=https://raw.githubusercontent.com/deadki0001/eks-demo-app/main/k8s/base/istio
+          echo "Waiting for lsd-payments namespace..."
           for i in $(seq 1 30); do
             kubectl get namespace lsd-payments 2>/dev/null && break
-            echo "Attempt $i - namespace not ready yet, waiting 10s..."
+            echo "Attempt $i - waiting 10s..."
             sleep 10
           done
-
           kubectl label namespace lsd-payments istio-injection=enabled --overwrite
-
-          kubectl apply -f - <<EOF
-apiVersion: security.istio.io/v1beta1
-kind: PeerAuthentication
-metadata:
-  name: default
-  namespace: lsd-payments
-spec:
-  mtls:
-    mode: STRICT
-EOF
-
-          kubectl apply -f - <<EOF
-apiVersion: security.istio.io/v1beta1
-kind: AuthorizationPolicy
-metadata:
-  name: lsd-backend-policy
-  namespace: lsd-payments
-spec:
-  selector:
-    matchLabels:
-      app: lsd-backend
-  rules:
-  - from:
-    - source:
-        principals:
-        - cluster.local/ns/lsd-payments/sa/default
-EOF
-
+          kubectl apply -f ${BASE}/peer-authentication.yaml
+          kubectl apply -f ${BASE}/authorization-policy.yaml
           echo "Istio security policies applied"
-
       - name: Verify all pods running
         run: |
           echo "=== Final pod status ==="
