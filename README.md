@@ -1,4 +1,4 @@
-# LSD Payments — AWS Architecture
+# LSD Payments - AWS Architecture
 
 **Region:** us-east-2 · **Author:** adkinsdevon001 · **Date:** 2026-06-08 · **Version:** v1.0
 
