@@ -101,6 +101,17 @@ jobs:
             aws elbv2 delete-load-balancer --load-balancer-arn $ARN --region us-east-2 || true
           done
           [ -n "$ISTIO_NLBS" ] && sleep 30 || true
+          echo "Cleaning up Istio security groups..."
+          if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; do
+            ISTIO_SGS=$(aws ec2 describe-security-groups --region us-east-2 \
+              --filters "Name=vpc-id,Values=$VPC_ID" \
+              --query "SecurityGroups[?GroupName!='default'].GroupId" \
+              --output text)
+            for SG in $ISTIO_SGS; do
+              echo "Deleting SG: $SG"
+              aws ec2 delete-security-group --group-id $SG --region us-east-2 || true
+            done
+          fi
           echo "Cleanup complete"
 
       - name: Terraform Destroy
