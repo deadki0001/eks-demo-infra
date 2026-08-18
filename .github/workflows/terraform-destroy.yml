@@ -102,7 +102,7 @@ jobs:
           done
           [ -n "$ISTIO_NLBS" ] && sleep 30 || true
           echo "Cleaning up Istio security groups..."
-          if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; do
+          if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
             ISTIO_SGS=$(aws ec2 describe-security-groups --region us-east-2 \
               --filters "Name=vpc-id,Values=$VPC_ID" \
               --query "SecurityGroups[?GroupName!='default'].GroupId" \
