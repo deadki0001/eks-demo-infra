@@ -100,7 +100,7 @@ jobs:
             echo "Deleting Istio NLB: $ARN"
             aws elbv2 delete-load-balancer --load-balancer-arn $ARN --region us-east-2 || true
           done
-          [ -n "$ISTIO_NLBS" ] && sleep 30 || true
+          if [ -n "$ISTIO_NLBS" ]; then sleep 30; fi
           echo "Cleaning up Istio security groups..."
           if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
             ISTIO_SGS=$(aws ec2 describe-security-groups --region us-east-2 \
